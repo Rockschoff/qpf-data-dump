@@ -152,9 +152,12 @@
         // Render the tree structure into an HTML unordered list with checkboxes
         function renderTree(node, parentElement, path = '') {
             const ul = document.createElement('ul');
+            ul.style.listStyleType = 'none'; // Remove default list styling
+            ul.style.paddingLeft = '20px';   // Add left padding for child nodes
 
             for (const key in node) {
                 const li = document.createElement('li');
+                li.style.marginBottom = '8px'; // Add space between rows
 
                 // Determine if the current node is a file or a folder
                 const isFile = Object.keys(node[key]).length === 0; // If no children, it's a file
@@ -167,15 +170,18 @@
                 li.appendChild(checkbox);
                 const textNode = document.createElement('span');
                 textNode.textContent = key;
-                
+
                 li.appendChild(textNode);
 
-                
-
                 if (!isFile) {
+                    // Apply styles to folders
                     textNode.style.fontWeight = 'bold';
                     textNode.style.color = 'blue';
                     textNode.style.textDecoration = 'underline';
+                    li.style.backgroundColor = '#f0f0f0'; // Light gray background for folders
+                    li.style.padding = '5px';            // Padding inside the folder row
+                    li.style.borderRadius = '5px';       // Rounded corners for folder rows
+
                     // Recursively render child nodes (subfolders/files)
                     renderTree(node[key], li, path + key + '/');
 
@@ -187,8 +193,11 @@
                             childCheckbox.checked = isChecked;
                         });
                     });
+                } else {
+                    // Optional: Additional styling for files (if needed)
+                    textNode.style.paddingLeft = '5px'; // Add slight padding to file names
                 }
-                
+
                 ul.appendChild(li);
             }
 
