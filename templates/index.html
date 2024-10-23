@@ -12,6 +12,12 @@
         #fileName {
             white-space: pre-line; /* Allows new lines for file names */
         }
+        ul {
+            list-style-type: none;
+        }
+        ul li {
+            margin-left: 20px;
+        }
     </style>
 </head>
 <body>
@@ -22,31 +28,41 @@
             
             <!-- File upload form -->
             <div class="box">
-                <h2 class="subtitle">Upload Files</h2>
+                <h2 class="subtitle">Upload Files/Folders</h2>
                 <form id="uploadForm">
+                    <div class="field">
+                        <label class="label">Folder Path (Optional)</label>
+                        <div class="control">
+                            <input class="input" type="text" id="folderInput" placeholder="Enter folder name">
+                        </div>
+                    </div>
                     <div class="file has-name is-boxed">
                         <label class="file-label">
-                            <input class="file-input" type="file" id="fileInput" name="files" multiple>
+                            <!-- Enable folder selection by adding `webkitdirectory` -->
+                            <input class="file-input" type="file" id="fileInput" name="files" multiple webkitdirectory>
                             <span class="file-cta">
                                 <span class="file-icon">
                                     <i class="fas fa-upload"></i>
                                 </span>
                                 <span class="file-label">
-                                    Click to choose files
+                                    Click here to choose files or folders
                                 </span>
                             </span>
                             <span class="file-name" id="fileName">No files uploaded</span>
                         </label>
                     </div>
                     <button class="button is-primary mt-3" type="submit" id="uploadButton">Upload</button>
-                    <p id="uploadStatus" class="mt-3"></p> <!-- Display status here -->
+                    <p id="uploadStatus" class="mt-3"></p>
                 </form>
             </div>
 
             <!-- File listing -->
             <div class="box">
                 <h2 class="subtitle">Files</h2>
-                <ul id="fileList"></ul>
+                <form id="deleteForm">
+                    <div id="fileTree"></div>
+                    <button class="button is-danger mt-3" type="submit" id="deleteButton">Delete Selected</button>
+                </form>
             </div>
         </div>
     </section>
@@ -56,57 +72,41 @@
         const fileName = document.getElementById('fileName');
         const uploadButton = document.getElementById('uploadButton');
         const uploadStatus = document.getElementById('uploadStatus');
-        const fileList = document.getElementById('fileList');
 
         let existingFiles = [];
 
-        // Update file name on selection (for multiple files)
+        // Update file name on selection (for multiple files/folders)
         fileInput.addEventListener('change', () => {
             const files = Array.from(fileInput.files);
             if (files.length > 0) {
                 // Display each file name on a new line
-                fileName.textContent = files.map(file => file.name).join('\n');
+                fileName.textContent = files.map(file => file.webkitRelativePath || file.name).join('\n');
             }
         });
 
-        // Load existing files and store them in `existingFiles` array
-        function loadFiles() {
-            fetch('/files')
-                .then(response => response.json())
-                .then(files => {
-                    existingFiles = files;  // Store existing files in the array
-                    fileList.innerHTML = '';
-                    files.forEach(file => {
-                        const li = document.createElement('li');
-                        li.innerHTML = `${file} <button class="button is-danger is-small" onclick="deleteFile('${file}')">Delete</button>`;
-                        fileList.appendChild(li);
-                    });
-                });
-        }
-
-        // Upload multiple files
+        // Upload multiple files/folders
         document.getElementById('uploadForm').addEventListener('submit', function (e) {
             e.preventDefault();
             const files = Array.from(fileInput.files);
             const formData = new FormData();
-
-            // Check for duplicate file names
-            const duplicateFiles = files.filter(file => existingFiles.includes(file.name));
-
-            if (duplicateFiles.length > 0) {
-                alert(`File(s) with the following name(s) already exist: ${duplicateFiles.map(file => file.name).join(', ')}. Please rename or remove them before uploading.`);
-                return; // Prevent upload if duplicates found
-            }
+            const folderName = document.getElementById('folderInput').value.trim(); // Get optional folder name
 
             if (files.length > 0) {
-                // Append all selected files to FormData
+                // Append folder name if provided
+                if (folderName) {
+                    formData.append('folder_name', folderName);
+                }
+
+                // Append all selected files, including folder structure
                 files.forEach(file => {
-                    formData.append('files', file);
+                    // Use webkitRelativePath to preserve folder structure
+                    console.log(file.webkitRelativePath)
+                    const relativePath = folderName ? `${file.webkitRelativePath}` : file.webkitRelativePath;
+                    formData.append('files', file, relativePath || file.name);
                 });
 
-                // Disable upload button and show "Uploading..." message
                 uploadButton.disabled = true;
-                uploadStatus.textContent = "Uploading...Please do not Refresh";
+                uploadStatus.textContent = "Uploading... Please do not refresh";
 
                 fetch('/upload', {
                     method: 'POST',
@@ -115,14 +115,12 @@
                 .then(response => response.json())
                 .then(data => {
                     alert(data.message);
-                    // Re-enable the upload button and clear the status message
                     uploadButton.disabled = false;
                     uploadStatus.textContent = "";
-                    fileName.textContent = "No files uploaded"; // Clear the file names after upload
+                    fileName.textContent = "No files uploaded";
                     loadFiles();
                 })
                 .catch(err => {
-                    // Re-enable the upload button and show error
                     uploadButton.disabled = false;
                     uploadStatus.textContent = "Upload failed. Try again.";
                     console.error(err);
@@ -132,15 +130,124 @@
             }
         });
 
-        // Delete file
-        function deleteFile(filename) {
-            fetch(`/delete/${filename}`, { method: 'DELETE' })
+        // Create a tree structure from the file paths
+        function createFileTree(paths) {
+            const tree = {};
+
+            paths.forEach(path => {
+                const parts = path.split('/');
+                let currentLevel = tree;
+
+                parts.forEach(part => {
+                    if (!currentLevel[part]) {
+                        currentLevel[part] = {};
+                    }
+                    currentLevel = currentLevel[part];
+                });
+            });
+
+            return tree;
+        }
+
+        // Render the tree structure into an HTML unordered list with checkboxes
+        function renderTree(node, parentElement, path = '') {
+            const ul = document.createElement('ul');
+
+            for (const key in node) {
+                const li = document.createElement('li');
+
+                // Determine if the current node is a file or a folder
+                const isFile = Object.keys(node[key]).length === 0; // If no children, it's a file
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = path + key;
+                checkbox.className = 'file-checkbox';
+                checkbox.dataset.type = isFile ? 'file' : 'folder'; // Mark if it's a file or folder
+
+                li.appendChild(checkbox);
+                const textNode = document.createElement('span');
+                textNode.textContent = key;
+                
+                li.appendChild(textNode);
+
+                
+
+                if (!isFile) {
+                    textNode.style.fontWeight = 'bold';
+                    textNode.style.color = 'blue';
+                    textNode.style.textDecoration = 'underline';
+                    // Recursively render child nodes (subfolders/files)
+                    renderTree(node[key], li, path + key + '/');
+
+                    // Add event listener for selecting/unselecting entire folder
+                    checkbox.addEventListener('change', function () {
+                        const isChecked = checkbox.checked;
+                        const childCheckboxes = li.querySelectorAll('input[type="checkbox"]');
+                        childCheckboxes.forEach(childCheckbox => {
+                            childCheckbox.checked = isChecked;
+                        });
+                    });
+                }
+                
+                ul.appendChild(li);
+            }
+
+            parentElement.appendChild(ul);
+        }
+
+        // Update the file list tree view
+        function updateFileTreeView(files) {
+            const treeContainer = document.getElementById('fileTree');
+            treeContainer.innerHTML = ''; // Clear the current tree view
+
+            const fileTree = createFileTree(files);
+            renderTree(fileTree, treeContainer); // Render the new tree structure
+        }
+
+        // Load files and update the tree view
+        function loadFiles() {
+            fetch('/files')
                 .then(response => response.json())
-                .then(data => {
-                    alert(data.message);
-                    loadFiles();
+                .then(files => {
+                    existingFiles = files;
+                    updateFileTreeView(files); // Update the file tree view
                 });
         }
+
+        // Handle deletion of selected files
+        document.getElementById('deleteForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+            // Only collect selected file checkboxes (ignore folders)
+            const selectedFiles = Array.from(document.querySelectorAll('.file-checkbox:checked'))
+                .filter(checkbox => checkbox.dataset.type === 'file') // Only include files, ignore folders
+                .map(checkbox => checkbox.value);
+
+            if (selectedFiles.length === 0) {
+                alert('No files selected for deletion.');
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to delete the selected file(s)?`)) {
+                return;
+            }
+
+            fetch('/delete', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ filenames: selectedFiles })
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                loadFiles(); // Reload the file tree after deletion
+            })
+            .catch(err => {
+                console.error(err);
+                alert('An error occurred while deleting files.');
+            });
+        });
 
         // Load files on page load
         loadFiles();

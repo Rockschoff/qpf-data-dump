@@ -24,39 +24,59 @@ def list_files():
     return jsonify(files)
 
 # Route to upload multiple files to the S3 bucket
-def upload_file_to_s3(file):
+def upload_file_to_s3(file, full_path):
     try:
         if file and file.filename:
+            # The full path already contains folder structure
             filename = secure_filename(file.filename)
-            print(f"Uploading {filename} to S3...")
-            s3_client.upload_fileobj(file, S3_BUCKET, filename)
-            print(f"Uploaded {filename} successfully!")
+            key = full_path  # Use the full relative path sent from the frontend as the S3 key
+
+            print(f"Uploading {key} to S3...")
+            s3_client.upload_fileobj(file, S3_BUCKET, key)
+            print(f"Uploaded {key} successfully!")
     except Exception as e:
         print(f"Failed to upload {file.filename}: {str(e)}")
         raise
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    print("I AM HERE")
-    files = request.files.getlist('files')  # Handle multiple files
+    files = request.files.getlist('files')  # Get all files including folder structure
+    folder_name = request.form.get('folder_name')  # Get the optional folder name from the form
+
     if files:
-        print("Total number of files are", len(files))
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            # Upload files concurrently
-            futures = [executor.submit(upload_file_to_s3, file) for file in files]
-            # Wait for all uploads to complete
+            futures = []
+            for file in files:
+                # Get the full path for each file (folder structure included)
+                full_path = file.filename  # This includes the folder structure passed by webkitRelativePath
+                if folder_name:
+                    # Prepend the optional folder name
+                    full_path = f"{folder_name}/{full_path}"
+
+                # Submit each file for upload with its full path
+                futures.append(executor.submit(upload_file_to_s3, file, full_path))
+
             concurrent.futures.wait(futures)
 
         return jsonify({'message': 'Files uploaded successfully!'}), 201
 
     return jsonify({'message': 'File upload failed.'}), 400
 
-# Route to delete a file from the S3 bucket
-@app.route('/delete/<filename>', methods=['DELETE'])
-def delete_file(filename):
+@app.route('/delete', methods=['DELETE'])
+def delete_files():
+    data = request.get_json()
+    filenames = data.get('filenames', [])
+
+    if not filenames:
+        return jsonify({'message': 'No files specified for deletion.'}), 400
+
     try:
-        s3_client.delete_object(Bucket=S3_BUCKET, Key=filename)
-        return jsonify({'message': f'{filename} deleted successfully.'}), 200
+        # Use ThreadPoolExecutor to delete files concurrently
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = [executor.submit(s3_client.delete_object, Bucket=S3_BUCKET, Key=filename) for filename in filenames]
+            concurrent.futures.wait(futures)
+
+        return jsonify({'message': 'Selected files deleted successfully.'}), 200
     except Exception as e:
         return jsonify({'message': str(e)}), 400
 
