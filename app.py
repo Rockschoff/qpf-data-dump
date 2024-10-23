@@ -40,6 +40,7 @@ def upload_file_to_s3(file, full_path):
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    print("call to /upload")
     files = request.files.getlist('files')  # Get all files including folder structure
     folder_name = request.form.get('folder_name')  # Get the optional folder name from the form
 
