@@ -8,7 +8,7 @@ import concurrent.futures
 app = Flask(__name__)
 
 # Configure AWS S3
-S3_BUCKET = "niagara-qpf-data-dump"
+S3_BUCKET = "niagara-docs-folder"
 s3_client = boto3.client('s3')
 
 # Home route
@@ -32,11 +32,20 @@ def upload_file_to_s3(file, full_path):
             key = full_path  # Use the full relative path sent from the frontend as the S3 key
 
             print(f"Uploading {key} to S3...")
-            s3_client.upload_fileobj(file, S3_BUCKET, key)
+            
+            # Upload file with 'processed=false' metadata
+            s3_client.upload_fileobj(
+                Fileobj=file,
+                Bucket=S3_BUCKET,
+                Key=key,
+                ExtraArgs={'Metadata': {'processed': 'false'}}
+            )
+            
             print(f"Uploaded {key} successfully!")
     except Exception as e:
         print(f"Failed to upload {file.filename}: {str(e)}")
         raise
+
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -82,4 +91,4 @@ def delete_files():
         return jsonify({'message': str(e)}), 400
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5544)
+    app.run(debug=True, host='0.0.0.0', port=5554)
